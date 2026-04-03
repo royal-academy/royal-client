@@ -1,0 +1,640 @@
+// src/pages/Admin/Management/ManageDailyLesson.tsx
+import { useState, useMemo } from "react";
+import { useForm, Controller, type SubmitHandler } from "react-hook-form";
+import { AnimatePresence } from "framer-motion";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import toast from "react-hot-toast";
+
+import axiosPublic from "../../../hooks/axiosPublic";
+import SelectInput from "../../../components/common/SelectInput";
+import Skeleton from "../../../components/common/Skeleton";
+import ErrorState from "../../../components/common/ErrorState";
+import EmptyState from "../../../components/common/Emptystate";
+import DatePicker, {
+  BN_DAYS_FULL,
+  BN_MONTHS,
+} from "../../../components/common/Datepicker";
+import { useAuth } from "../../../context/AuthContext";
+import { CLASS_OPTIONS, getSubjects } from "../../../utility/Constants";
+import { toBn } from "../../../utility/shared";
+
+import {
+  RequiredStar,
+  ErrMsg,
+  PageHeader,
+  FilterBar,
+  SearchBox,
+  ResultCount,
+  StatCard,
+  RecordGrid,
+  RecordCard,
+  DeleteModal,
+  EditModalShell,
+  BookOpen,
+  User,
+  Award,
+  inputCls,
+  labelCls,
+} from "./ManagementUI";
+import type { ManagedRecord } from "./ManagementShell";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface TeacherObj {
+  _id: string;
+  name: string;
+  slug?: string;
+  avatar?: { url: string | null } | string | null;
+}
+
+interface DailyLessonRecord {
+  _id: string;
+  subject: string;
+  // populated from server — can be object or string
+  teacher: TeacherObj | string;
+  teacherSlug?: string;
+  class: string;
+  chapterNumber: string;
+  referenceType?: "chapter" | "page";
+  topics: string;
+  date: string; // ← lesson's actual date field
+  createdAt: string;
+}
+
+interface EditFormValues {
+  subject: string;
+  class: string;
+  chapterNumber: string;
+  topics: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HELPERS
+// ─────────────────────────────────────────────────────────────────────────────
+const toBnDateStr = (d: Date) =>
+  `${BN_DAYS_FULL[d.getDay()]}, ${toBn(d.getDate())} ${BN_MONTHS[d.getMonth()]} ${toBn(d.getFullYear())}`;
+
+/** Resolve teacher name from populated object or plain string */
+const resolveTeacherName = (
+  teacher: TeacherObj | string | null | undefined,
+): string => {
+  if (!teacher) return "—";
+  if (typeof teacher === "string") return teacher || "—";
+  return teacher.name?.trim() || "—";
+};
+
+/** Resolve teacher slug from populated object or record's teacherSlug fallback */
+const resolveTeacherSlug = (
+  teacher: TeacherObj | string | null | undefined,
+  teacherSlug?: string,
+): string => {
+  if (typeof teacher === "object" && teacher !== null && teacher.slug) {
+    return teacher.slug;
+  }
+  return teacherSlug ?? "";
+};
+
+/** Check if a lesson date (ISO string) matches a reference Date (by calendar day) */
+const isSameDay = (iso: string, ref: Date): boolean => {
+  const d = new Date(iso);
+  return (
+    d.getFullYear() === ref.getFullYear() &&
+    d.getMonth() === ref.getMonth() &&
+    d.getDate() === ref.getDate()
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONSTANTS
+// ─────────────────────────────────────────────────────────────────────────────
+const API_PATH = "/api/daily-lesson";
+const QUERY_KEY = ["daily-lessons"];
+const MANAGER_ROLES = ["principal", "admin", "owner"];
+
+const ROLE_BADGE: Record<string, string> = {
+  admin:
+    "bg-rose-100   dark:bg-rose-900/30   text-rose-600   dark:text-rose-400",
+  owner:
+    "bg-amber-100  dark:bg-amber-900/30  text-amber-600  dark:text-amber-400",
+  principal:
+    "bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300",
+  teacher:
+    "bg-blue-100   dark:bg-blue-900/30   text-blue-700   dark:text-blue-300",
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EDIT MODAL
+// ─────────────────────────────────────────────────────────────────────────────
+const EditModal = ({
+  record,
+  onClose,
+}: {
+  record: DailyLessonRecord;
+  onClose: () => void;
+}) => {
+  const qc = useQueryClient();
+
+  const {
+    register,
+    handleSubmit,
+    control,
+    watch,
+    setValue,
+    formState: { errors, isValid, isDirty, touchedFields },
+  } = useForm<EditFormValues>({
+    mode: "onTouched",
+    defaultValues: {
+      subject: record.subject,
+      class: record.class,
+      chapterNumber: record.chapterNumber,
+      topics: record.topics,
+    },
+  });
+
+  const selectedClass = watch("class");
+
+  // Resolve teacher _id for PATCH payload (server expects ObjectId)
+  const teacherId =
+    typeof record.teacher === "object" && record.teacher !== null
+      ? record.teacher._id
+      : record.teacher;
+
+  const mutation = useMutation({
+    mutationFn: async (data: EditFormValues) =>
+      axiosPublic.patch(`${API_PATH}/${record._id}`, {
+        subject: data.subject,
+        class: data.class,
+        chapterNumber: data.chapterNumber,
+        topics: data.topics,
+        teacher: teacherId,
+        ...(resolveTeacherSlug(record.teacher, record.teacherSlug) && {
+          teacherSlug: resolveTeacherSlug(record.teacher, record.teacherSlug),
+        }),
+      }),
+    onSuccess: () => {
+      toast.success("সফলভাবে আপডেট হয়েছে!");
+      qc.invalidateQueries({ queryKey: QUERY_KEY });
+      onClose();
+    },
+    onError: (err: Error & { response?: { data?: { message?: string } } }) =>
+      toast.error(
+        err?.response?.data?.message || err?.message || "আপডেট ব্যর্থ হয়েছে",
+      ),
+  });
+
+  const onSubmit: SubmitHandler<EditFormValues> = (data) =>
+    mutation.mutate(data);
+
+  return (
+    <EditModalShell
+      onClose={onClose}
+      onSubmit={handleSubmit(onSubmit)}
+      isPending={mutation.isPending}
+      isValid={isValid}
+      isDirty={isDirty}
+    >
+      {/* Class + Subject */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+        <Controller
+          name="class"
+          control={control}
+          rules={{ required: "শ্রেণি আবশ্যিক" }}
+          render={({ field, fieldState }) => (
+            <SelectInput
+              label="শ্রেণি"
+              required
+              placeholder="শ্রেণি বেছে নিন"
+              options={CLASS_OPTIONS}
+              value={field.value}
+              onChange={(v) => {
+                field.onChange(v);
+                setValue("subject", "", { shouldTouch: false });
+              }}
+              onBlur={field.onBlur}
+              error={fieldState.error?.message}
+              isTouched={fieldState.isTouched}
+            />
+          )}
+        />
+        <Controller
+          name="subject"
+          control={control}
+          rules={{ required: "বিষয় আবশ্যিক" }}
+          render={({ field, fieldState }) => (
+            <SelectInput
+              label="বিষয়"
+              required
+              placeholder={
+                selectedClass ? "বিষয় বেছে নিন" : "আগে শ্রেণি বেছে নিন"
+              }
+              options={getSubjects(selectedClass)}
+              value={field.value}
+              onChange={field.onChange}
+              onBlur={field.onBlur}
+              disabled={!selectedClass}
+              error={fieldState.error?.message}
+              isTouched={fieldState.isTouched}
+            />
+          )}
+        />
+      </div>
+
+      {/* Chapter number */}
+      <div>
+        <label className={labelCls}>
+          অধ্যায় নম্বর <RequiredStar />
+        </label>
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="যেমন: ১, ৫, ২.৫"
+          {...register("chapterNumber", {
+            required: "অধ্যায় নম্বর আবশ্যিক",
+            minLength: { value: 1, message: "সঠিক নম্বর দিন" },
+          })}
+          className={inputCls(
+            !!errors.chapterNumber,
+            !!touchedFields.chapterNumber && !errors.chapterNumber,
+          )}
+        />
+        <ErrMsg msg={errors.chapterNumber?.message} />
+      </div>
+
+      {/* Topics */}
+      <div>
+        <label className={labelCls}>
+          বিষয়বস্তু <RequiredStar />
+        </label>
+        <textarea
+          rows={4}
+          placeholder="বিষয়বস্তু লিখুন..."
+          {...register("topics", {
+            required: "বিষয়বস্তু আবশ্যিক",
+            minLength: { value: 6, message: "কমপক্ষে ৬ অক্ষর লিখুন" },
+          })}
+          className={`${inputCls(!!errors.topics, !!touchedFields.topics && !errors.topics)} resize-none leading-relaxed bangla`}
+        />
+        <ErrMsg msg={errors.topics?.message} />
+      </div>
+    </EditModalShell>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN PAGE
+// ─────────────────────────────────────────────────────────────────────────────
+const ManageDailyLesson = () => {
+  const { user } = useAuth();
+  const qc = useQueryClient();
+
+  const isManager = MANAGER_ROLES.includes(user?.role ?? "");
+  const mySlug = user?.slug ?? "";
+
+  // ── filter state ────────────────────────────────────────────────────────────
+  const today = new Date();
+  const [filterDateStr, setFilterDateStr] = useState(toBnDateStr(today));
+  const [filterDateObj, setFilterDateObj] = useState<Date | null>(today);
+  const [search, setSearch] = useState("");
+  const [filterClass, setFilterClass] = useState("");
+  const [filterTeacherSlug, setFilterTeacherSlug] = useState(
+    isManager ? "" : mySlug,
+  );
+
+  // ── modal state ─────────────────────────────────────────────────────────────
+  const [editTarget, setEditTarget] = useState<DailyLessonRecord | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DailyLessonRecord | null>(
+    null,
+  );
+
+  // ── data fetching ───────────────────────────────────────────────────────────
+  const {
+    data: records = [],
+    isLoading,
+    isError,
+  } = useQuery<DailyLessonRecord[]>({
+    queryKey: QUERY_KEY,
+    queryFn: async () => {
+      const res = await axiosPublic.get(API_PATH);
+      const p = res.data;
+      const raw: Record<string, unknown>[] = Array.isArray(p)
+        ? p
+        : Array.isArray(p?.data)
+          ? p.data
+          : [];
+
+      return raw.map((r) => {
+        const teacher = r.teacher as TeacherObj | string;
+        return {
+          _id: r._id as string,
+          subject: r.subject as string,
+          teacher,
+          // prefer slug from populated teacher object, fall back to teacherSlug field
+          teacherSlug: resolveTeacherSlug(
+            teacher,
+            r.teacherSlug as string | undefined,
+          ),
+          class: r.class as string,
+          chapterNumber: r.chapterNumber as string,
+          referenceType: r.referenceType as "chapter" | "page" | undefined,
+          topics: r.topics as string,
+          date: r.date as string, // ← lesson date
+          createdAt: r.createdAt as string,
+        };
+      });
+    },
+    staleTime: 1000 * 30,
+    refetchInterval: 1000 * 60,
+    refetchOnWindowFocus: true,
+  });
+
+  const { data: allStaff = [] } = useQuery<{ slug: string; name: string }[]>({
+    queryKey: ["staff-for-filter"],
+    queryFn: async () => {
+      const res = await axiosPublic.get("/api/users");
+      const list: Record<string, unknown>[] = Array.isArray(res.data)
+        ? res.data
+        : [];
+      return list
+        .filter(
+          (u) =>
+            ["teacher", "principal", "admin", "owner"].includes(
+              u.role as string,
+            ) && u.slug,
+        )
+        .map((u) => ({ slug: u.slug as string, name: u.name as string }));
+    },
+    enabled: isManager,
+  });
+
+  // ── derived data ────────────────────────────────────────────────────────────
+
+  /**
+   * activeDates: uses lesson's `date` field (not createdAt)
+   * Format: "YYYY-M-D" — matches DatePicker's activeDates format
+   */
+  const activeDates = useMemo(() => {
+    const activeSlug = isManager ? filterTeacherSlug : mySlug;
+    return new Set(
+      records
+        .filter((r) => !activeSlug || r.teacherSlug === activeSlug)
+        .map((r) => {
+          const d = new Date(r.date);
+          return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        }),
+    );
+  }, [records, filterTeacherSlug, isManager, mySlug]);
+
+  const teacherOptions = useMemo(
+    () => [
+      { value: "", label: "সকল শিক্ষক" },
+      ...allStaff.map((u) => ({ value: u.slug, label: u.name })),
+    ],
+    [allStaff],
+  );
+
+  const filtered = useMemo(
+    () =>
+      records.filter((r) => {
+        const q = search.toLowerCase();
+        const activeSlug = isManager ? filterTeacherSlug : mySlug;
+        const matchTeacher = !activeSlug || r.teacherSlug === activeSlug;
+
+        // ← filter by lesson date, not createdAt
+        const matchDate = !filterDateObj || isSameDay(r.date, filterDateObj);
+
+        return (
+          matchTeacher &&
+          matchDate &&
+          (!filterClass || r.class === filterClass) &&
+          (!q ||
+            r.subject.toLowerCase().includes(q) ||
+            r.topics.toLowerCase().includes(q) ||
+            r.chapterNumber.includes(q))
+        );
+      }),
+    [
+      records,
+      search,
+      filterClass,
+      filterDateObj,
+      filterTeacherSlug,
+      isManager,
+      mySlug,
+    ],
+  );
+
+  // ── delete mutation ─────────────────────────────────────────────────────────
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => axiosPublic.delete(`${API_PATH}/${id}`),
+    onSuccess: () => {
+      toast.success("সফলভাবে মুছে ফেলা হয়েছে");
+      qc.invalidateQueries({ queryKey: QUERY_KEY });
+      setDeleteTarget(null);
+    },
+    onError: (err: Error & { response?: { data?: { message?: string } } }) =>
+      toast.error(
+        err?.response?.data?.message || err?.message || "মুছতে ব্যর্থ হয়েছে",
+      ),
+  });
+
+  // ── stats ───────────────────────────────────────────────────────────────────
+  const totalForSlug =
+    isManager && !filterTeacherSlug
+      ? records.length
+      : records.filter(
+          (r) => r.teacherSlug === (isManager ? filterTeacherSlug : mySlug),
+        ).length;
+
+  const stats = [
+    {
+      label: "মোট",
+      value: totalForSlug,
+      icon: <BookOpen className="w-4 h-4" />,
+      color: "text-violet-600 bg-violet-50 dark:bg-violet-900/20",
+    },
+    {
+      label: "শ্রেণি",
+      value: new Set(
+        records
+          .filter(
+            (r) => !filterTeacherSlug || r.teacherSlug === filterTeacherSlug,
+          )
+          .map((r) => r.class),
+      ).size,
+      icon: <Award className="w-4 h-4" />,
+      color: "text-blue-600 bg-blue-50 dark:bg-blue-900/20",
+    },
+    {
+      label: isManager ? "শিক্ষক" : "নাম",
+      value: isManager ? allStaff.length : (user?.name ?? "—"),
+      icon: <User className="w-4 h-4" />,
+      color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20",
+    },
+  ];
+
+  const hasFilter = !!(search || filterClass || filterTeacherSlug);
+
+  /**
+   * Convert DailyLessonRecord → ManagedRecord shape for RecordCard / DeleteModal
+   * teacher name is properly extracted from populated object
+   */
+  const toCardRecord = (r: DailyLessonRecord): ManagedRecord => ({
+    _id: r._id,
+    subject: r.subject,
+    teacher: resolveTeacherName(r.teacher), // ← always a display string
+    teacherSlug: r.teacherSlug,
+    class: r.class,
+    groupKey: r.chapterNumber,
+    topics: r.topics,
+    images: undefined,
+    createdAt: r.createdAt,
+  });
+
+  // ── early returns ───────────────────────────────────────────────────────────
+  if (isLoading)
+    return (
+      <div className="min-h-screen bg-[var(--color-bg)] py-10 px-4">
+        <Skeleton variant="daily-lesson" />
+      </div>
+    );
+
+  if (isError)
+    return (
+      <div className="min-h-screen bg-[var(--color-bg)] flex items-center justify-center">
+        <ErrorState message="ডেটা লোড করতে ব্যর্থ হয়েছে। পুনরায় চেষ্টা করুন।" />
+      </div>
+    );
+
+  // ── render ──────────────────────────────────────────────────────────────────
+  return (
+    <div className="min-h-screen bg-[var(--color-bg)] py-8 md:py-10">
+      <PageHeader
+        title="দৈনিক পাঠ পরিচালনা"
+        subtitle={
+          isManager
+            ? "সকল শিক্ষকের ডেটা দেখুন, সম্পাদনা করুন বা মুছে ফেলুন"
+            : "আপনার যোগ করা ডেটা দেখুন ও পরিচালনা করুন"
+        }
+        roleBadge={
+          user?.role && ROLE_BADGE[user.role]
+            ? { label: user.role, color: ROLE_BADGE[user.role] }
+            : null
+        }
+      />
+
+      {/* Stats */}
+      <div className="grid grid-cols-3 gap-3 sm:gap-4 mb-6">
+        {stats.map((stat, i) => (
+          <StatCard key={stat.label} stat={stat} index={i} />
+        ))}
+      </div>
+
+      {/* Filters */}
+      <FilterBar>
+        <SearchBox
+          value={search}
+          onChange={setSearch}
+          placeholder="বিষয় বা বিষয়বস্তু খুঁজুন…"
+        />
+
+        <div className="sm:w-44">
+          <SelectInput
+            options={[{ value: "", label: "সকল শ্রেণি" }, ...CLASS_OPTIONS]}
+            value={filterClass}
+            onChange={setFilterClass}
+            placeholder="সকল শ্রেণি"
+          />
+        </div>
+
+        {isManager && (
+          <div className="sm:w-52">
+            <SelectInput
+              options={teacherOptions}
+              value={filterTeacherSlug}
+              onChange={setFilterTeacherSlug}
+              placeholder="সকল শিক্ষক"
+            />
+          </div>
+        )}
+
+        {/* Date filter uses lesson's `date` field */}
+        <div className="sm:w-64">
+          <DatePicker
+            value={filterDateStr}
+            onChange={(val) => {
+              setFilterDateStr(val);
+              if (!val) setFilterDateObj(null);
+            }}
+            onDateChange={(d) => setFilterDateObj(d)}
+            placeholder="তারিখ ফিল্টার করুন"
+            maxDate={new Date()}
+            activeDates={activeDates}
+          />
+        </div>
+      </FilterBar>
+
+      {/* Content */}
+      <AnimatePresence mode="wait">
+        {filtered.length === 0 ? (
+          <div key="empty">
+            <EmptyState
+              title="কোনো ডেটা পাওয়া যায়নি"
+              message={
+                search || filterClass || filterDateStr || filterTeacherSlug
+                  ? "এই ফিল্টারে কোনো ডেটা নেই"
+                  : "এখনো কিছু যোগ করা হয়নি"
+              }
+              icon={<BookOpen className="w-10 h-10 text-[var(--color-gray)]" />}
+            />
+          </div>
+        ) : (
+          <div key="grid">
+            {/* ResultCount outside RecordGrid so it doesn't sit inside the CSS grid */}
+            <ResultCount
+              visible={filtered.length}
+              total={records.length}
+              hasFilter={hasFilter}
+            />
+            <RecordGrid>
+              {filtered.map((r, i) => (
+                <RecordCard
+                  key={r._id}
+                  record={toCardRecord(r)}
+                  index={i}
+                  groupLabel="অধ্যায়"
+                  onEdit={() => setEditTarget(r)}
+                  onDelete={() => setDeleteTarget(r)}
+                />
+              ))}
+            </RecordGrid>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Modals */}
+      <AnimatePresence>
+        {editTarget && (
+          <EditModal
+            key="edit"
+            record={editTarget}
+            onClose={() => setEditTarget(null)}
+          />
+        )}
+        {deleteTarget && (
+          <DeleteModal
+            key="delete"
+            record={toCardRecord(deleteTarget)}
+            groupLabel="অধ্যায়"
+            onConfirm={() => deleteMutation.mutate(deleteTarget._id)}
+            onCancel={() => setDeleteTarget(null)}
+            isPending={deleteMutation.isPending}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+};
+
+export default ManageDailyLesson;
