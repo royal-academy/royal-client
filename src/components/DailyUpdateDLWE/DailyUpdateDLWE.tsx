@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router";
 import { motion } from "framer-motion";
 import Marquee from "react-fast-marquee";
 import {
@@ -34,13 +35,8 @@ interface NormalizedExam extends WeeklyExamRaw {
 }
 
 // ─── Helpers ──────────────────────────────────────────────
-const isFriday = () => {
-  return new Date().getDay() === 5;
-};
-
-const isSaturday = () => {
-  return new Date().getDay() === 6;
-};
+const isFriday = () => new Date().getDay() === 5;
+const isSaturday = () => new Date().getDay() === 6;
 
 const todayBn = () => {
   const d = new Date();
@@ -76,9 +72,11 @@ const normalizeImages = (
 const LessonCard = ({
   lesson,
   index,
+  onClick,
 }: {
   lesson: DailyLessonData;
   index: number;
+  onClick: () => void;
 }) => {
   const color = CLASS_COLORS[lesson.class] ?? DEFAULT_CLASS_COLOR;
   const Icon = lesson.referenceType === "page" ? FileText : BookOpen;
@@ -98,7 +96,8 @@ const LessonCard = ({
         ease: [0.22, 1, 0.36, 1],
       }}
       whileHover={{ y: -2, transition: { duration: 0.15 } }}
-      className="relative flex-shrink-0 w-[210px] rounded-xl overflow-hidden cursor-default bangla"
+      onClick={onClick}
+      className="relative flex-shrink-0 w-[210px] rounded-xl overflow-hidden cursor-pointer bangla"
       style={{
         border: "1px solid var(--color-active-border)",
         background: "var(--color-bg)",
@@ -159,7 +158,15 @@ const LessonCard = ({
 };
 
 // ─── Exam Card ────────────────────────────────────────────
-const ExamCard = ({ exam, index }: { exam: NormalizedExam; index: number }) => {
+const ExamCard = ({
+  exam,
+  index,
+  onClick,
+}: {
+  exam: NormalizedExam;
+  index: number;
+  onClick: () => void;
+}) => {
   const [imgError, setImgError] = useState(false);
   const color = EXAM_COLORS[index % EXAM_COLORS.length];
   const firstImg = exam.normalizedImages[0];
@@ -175,7 +182,8 @@ const ExamCard = ({ exam, index }: { exam: NormalizedExam; index: number }) => {
         ease: [0.22, 1, 0.36, 1],
       }}
       whileHover={{ y: -2, transition: { duration: 0.15 } }}
-      className="relative flex-shrink-0 w-[210px] rounded-xl overflow-hidden cursor-default bangla"
+      onClick={onClick}
+      className="relative flex-shrink-0 w-[210px] rounded-xl overflow-hidden cursor-pointer bangla"
       style={{
         border: "1px solid var(--color-active-border)",
         background: "var(--color-bg)",
@@ -279,14 +287,13 @@ const Dot = ({ color }: { color: string }) => (
 
 // ─── Main Component ───────────────────────────────────────
 const DailyUpdateDLWE = () => {
-  const friday = isFriday();
+  const navigate = useNavigate();
+
+  // ✅ Compute flags first — no hooks after conditional returns
   const saturday = isSaturday();
+  const showExam = isFriday();
 
-  // 👉 Saturday হলে পুরো component hide
-  if (saturday) return null;
-
-  const showExam = friday;
-
+  // ✅ All hooks called unconditionally at the top level
   const { data: lessonData } = useQuery<DailyLessonData[]>({
     queryKey: ["daily-lessons"],
     queryFn: async () => {
@@ -296,7 +303,7 @@ const DailyUpdateDLWE = () => {
     },
     staleTime: 1000 * 30,
     refetchInterval: 1000 * 60,
-    enabled: !showExam,
+    enabled: !showExam && !saturday,
   });
 
   const { data: examData } = useQuery<WeeklyExamRaw[]>({
@@ -307,7 +314,7 @@ const DailyUpdateDLWE = () => {
       return Array.isArray(p) ? p : Array.isArray(p?.data) ? p.data : [];
     },
     staleTime: 1000 * 60,
-    enabled: showExam,
+    enabled: showExam && !saturday,
   });
 
   const todayLessons = useMemo(() => {
@@ -351,15 +358,19 @@ const DailyUpdateDLWE = () => {
       .map((e) => ({ ...e, normalizedImages: normalizeImages(e.images) }));
   }, [examData]);
 
-  const currentExamNumber = thisWeekExams[0]?.ExamNumber ?? "";
+  // ✅ Early return AFTER all hooks
+  if (saturday) return null;
+
   const isLesson = !showExam;
   const items = isLesson ? todayLessons : thisWeekExams;
   const accentColor = isLesson ? "#6366f1" : "#f59e0b";
+  const currentExamNumber = thisWeekExams[0]?.ExamNumber ?? "";
 
-  if (isLesson && items.length === 0) return null;
-  if (!isLesson && items.length === 0) return null;
+  if (items.length === 0) return null;
 
   const repeated = [...items, ...items, ...items];
+
+  const handleNavigate = () => navigate("/weekly-exam");
 
   return (
     <motion.div
@@ -369,18 +380,21 @@ const DailyUpdateDLWE = () => {
       className="bangla mt-8"
     >
       {/* ── Header ── */}
-      <div className="flex flex-col items-center ">
+      <div
+        className="flex flex-col items-center cursor-pointer"
+        onClick={handleNavigate}
+      >
         <span className="text-2xl md:text-4xl font-bold text-[var(--color-text)]">
           {isLesson
             ? "আজকের পড়া"
-            : `সাপ্তাহিক পরীক্ষার ধারণা নং ${toBn(currentExamNumber)}`}
+            : `সাপ্তাহিক পরীক্ষার ধারণা নং-${toBn(currentExamNumber)}`}
         </span>
 
         <span className="text-2xl md:text-3xl text-[var(--color-text)]">
           {todayBn()}
         </span>
 
-        <span className=" text-xl md:text-2xl text-[var(--color-gray)]">
+        <span className="text-xl md:text-2xl text-[var(--color-gray)]">
           মোট{" "}
           <span className="font-bold text-[var(--color-text)]">
             {toBn(String(items.length))}
@@ -400,6 +414,7 @@ const DailyUpdateDLWE = () => {
                     key={`l-${i}`}
                     lesson={item as DailyLessonData}
                     index={i % items.length}
+                    onClick={handleNavigate}
                   />
                   <Dot color={accentColor} />
                 </>
@@ -409,6 +424,7 @@ const DailyUpdateDLWE = () => {
                     key={`e-${i}`}
                     exam={item as NormalizedExam}
                     index={i % items.length}
+                    onClick={handleNavigate}
                   />
                   <Dot color={accentColor} />
                 </>
