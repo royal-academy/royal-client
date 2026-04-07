@@ -13,6 +13,7 @@ import {
   Check,
 } from "lucide-react";
 import axiosPublic, { multipartConfig } from "../../../hooks/axiosPublic";
+import Button from "../../../components/common/Button";
 
 interface HeroFormData {
   title: string;
@@ -26,7 +27,6 @@ interface ApiError {
   };
 }
 
-// Canvas থেকে cropped blob বানাও
 const getCroppedBlob = (
   image: HTMLImageElement,
   pixelCrop: PixelCrop,
@@ -35,19 +35,24 @@ const getCroppedBlob = (
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("No canvas context");
 
-  canvas.width = pixelCrop.width;
-  canvas.height = pixelCrop.height;
+  // ✅ getBoundingClientRect() — mobile/tablet এ সবচেয়ে reliable
+  const rect = image.getBoundingClientRect();
+  const scaleX = image.naturalWidth / rect.width;
+  const scaleY = image.naturalHeight / rect.height;
+
+  canvas.width = Math.round(pixelCrop.width * scaleX);
+  canvas.height = Math.round(pixelCrop.height * scaleY);
 
   ctx.drawImage(
     image,
-    pixelCrop.x,
-    pixelCrop.y,
-    pixelCrop.width,
-    pixelCrop.height,
+    pixelCrop.x * scaleX,
+    pixelCrop.y * scaleY,
+    pixelCrop.width * scaleX,
+    pixelCrop.height * scaleY,
     0,
     0,
-    pixelCrop.width,
-    pixelCrop.height,
+    canvas.width,
+    canvas.height,
   );
 
   return new Promise((resolve, reject) => {
@@ -104,14 +109,32 @@ const AddHero = () => {
 
   const onImageLoad = useCallback(
     (e: React.SyntheticEvent<HTMLImageElement>) => {
-      const { width, height } = e.currentTarget.getBoundingClientRect();
+      const img = e.currentTarget;
 
-      const cropWidth = width;
-      const cropHeight = height * 0.8;
-      const x = 0;
-      const y = (height - cropHeight) / 2;
+      // ✅ setTimeout — mobile এ layout settle হওয়ার পর run করে
+      setTimeout(() => {
+        const rect = img.getBoundingClientRect();
+        const displayW = rect.width;
+        const displayH = rect.height;
 
-      setCrop({ unit: "px", x, y, width: cropWidth, height: cropHeight });
+        if (!displayW || !displayH) return;
+
+        setCrop({
+          unit: "px",
+          x: 0,
+          y: 0,
+          width: displayW,
+          height: displayH,
+        });
+
+        setCompletedCrop({
+          unit: "px",
+          x: 0,
+          y: 0,
+          width: displayW,
+          height: displayH,
+        } as PixelCrop);
+      }, 50); // 50ms যথেষ্ট
     },
     [],
   );
@@ -387,34 +410,37 @@ const AddHero = () => {
                   onChange={(c) => setCrop(c)}
                   onComplete={(c) => setCompletedCrop(c)}
                   minWidth={100}
-                  aspect={8 / 3}
                 >
                   <img
                     ref={imgRef}
                     src={rawImageSrc}
                     alt="Crop source"
                     onLoad={onImageLoad}
-                    className="max-w-full object-contain"
+                    style={{
+                      maxWidth: "100%",
+                      maxHeight: "70vh",
+                      objectFit: "contain",
+                    }}
                   />
                 </ReactCrop>
               </div>
 
               {/* Action buttons */}
               <div className="flex gap-3 mt-4">
-                <button
+                <Button
                   onClick={() => setIsCropping(false)}
-                  className="flex-1 py-3 rounded-xl border-2 border-[var(--color-active-border)] text-[var(--color-text)] font-semibold hover:bg-[var(--color-active-bg)] transition-all"
+                  className="flex-1 py-3 rounded  font-semibold bg-red-500 transition-all"
                 >
                   Cancel
-                </button>
-                <button
+                </Button>
+                <Button
                   onClick={handleCropConfirm}
                   disabled={!completedCrop}
-                  className="flex-1 py-3 rounded-xl bg-[var(--color-text)] text-[var(--color-bg)] font-semibold flex items-center justify-center gap-2 disabled:opacity-50 transition-all"
+                  className="flex-1 py-3 text-md md:text-xl rounded justify-center gap-2 disabled:opacity-50 transition-all"
                 >
                   <Check className="w-5 h-5" />
-                  Confirm Crop
-                </button>
+                  Crop
+                </Button>
               </div>
             </motion.div>
           </motion.div>

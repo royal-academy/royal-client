@@ -285,15 +285,12 @@ const Dot = ({ color }: { color: string }) => (
   </div>
 );
 
-// ─── Main Component ───────────────────────────────────────
 const DailyUpdateDLWE = () => {
   const navigate = useNavigate();
 
-  // ✅ Compute flags first — no hooks after conditional returns
   const saturday = isSaturday();
   const showExam = isFriday();
 
-  // ✅ All hooks called unconditionally at the top level
   const { data: lessonData } = useQuery<DailyLessonData[]>({
     queryKey: ["daily-lessons"],
     queryFn: async () => {
@@ -358,7 +355,6 @@ const DailyUpdateDLWE = () => {
       .map((e) => ({ ...e, normalizedImages: normalizeImages(e.images) }));
   }, [examData]);
 
-  // ✅ Early return AFTER all hooks
   if (saturday) return null;
 
   const isLesson = !showExam;
@@ -370,7 +366,8 @@ const DailyUpdateDLWE = () => {
 
   const repeated = [...items, ...items, ...items];
 
-  const handleNavigate = () => navigate("/weekly-exam");
+  const handleNavigate = () =>
+    navigate(isLesson ? "/dailylesson" : "/weekly-exam");
 
   return (
     <motion.div
