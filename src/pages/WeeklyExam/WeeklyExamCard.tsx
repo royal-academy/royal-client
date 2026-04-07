@@ -55,7 +55,7 @@ const WeeklyExamCard = ({ exam, index }: WeeklyExamCardProps) => {
         className={`
           group overflow-hidden rounded-2xl bg-[var(--color-bg)] 
           text-[var(--color-text)] shadow-md shadow-slate-200/50 
-          dark:shadow-black/40 border border-[var(--color-active-border)]/60
+           border border-[var(--color-active-border)]/60
           hover:shadow-xl hover:border-[var(--color-active-border)]/90
           transition-all duration-300
         `}

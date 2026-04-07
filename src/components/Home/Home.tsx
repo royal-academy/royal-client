@@ -5,6 +5,7 @@ import Principal from "../Intro/Principal";
 import VicePrincipal from "../Intro/VicePrincipal";
 import Teacher from "../Teachers/Teacher";
 import DailyUpdateDLWE from "../DailyUpdateDLWE/DailyUpdateDLWE";
+import Contact from "../Contact/Contact";
 
 const Home = () => {
   useEffect(() => {
@@ -19,6 +20,7 @@ const Home = () => {
       <Principal />
       <VicePrincipal />
       <Teacher />
+      <Contact />
     </div>
   );
 };

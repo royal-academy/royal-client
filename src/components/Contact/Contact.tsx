@@ -1,4 +1,3 @@
-import { Link } from "react-router";
 import { motion, useInView } from "framer-motion";
 import { useRef, memo } from "react";
 import Social from "./Social";
@@ -106,29 +105,6 @@ const Contact = () => (
           </div>
         </div>
       </FadeUp>
-
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.7 }}
-        className="pb-20 md:pb-5 mt-10 border-t border-[var(--color-active-border)]"
-      >
-        <div className="md:mx-10 mt-10 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-base">
-            &copy; ২০২৪ হতে সর্বস্বত্ব সংরক্ষিত — রয়েল একাডেমি, বেলকুচি
-          </p>
-          <p className="text-base">
-            Developed by{" "}
-            <Link
-              to="https://masudibnbelat.vercel.app"
-              target="_blank"
-              className="font-extrabold rubik underline"
-            >
-              Masud Ibn Belat
-            </Link>
-          </p>
-        </div>
-      </motion.div>
     </div>
   </footer>
 );
