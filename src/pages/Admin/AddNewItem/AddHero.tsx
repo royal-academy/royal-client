@@ -35,13 +35,18 @@ const getCroppedBlob = (
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("No canvas context");
 
-  // ✅ getBoundingClientRect() — mobile/tablet এ সবচেয়ে reliable
   const rect = image.getBoundingClientRect();
   const scaleX = image.naturalWidth / rect.width;
   const scaleY = image.naturalHeight / rect.height;
 
   canvas.width = Math.round(pixelCrop.width * scaleX);
   canvas.height = Math.round(pixelCrop.height * scaleY);
+
+  // ✅ Canvas width সবসময় height এর চেয়ে বড় কিনা check
+  if (canvas.width < canvas.height) {
+    // Portrait হয়ে গেলে swap করো
+    [canvas.width, canvas.height] = [canvas.height, canvas.width];
+  }
 
   ctx.drawImage(
     image,
@@ -111,7 +116,6 @@ const AddHero = () => {
     (e: React.SyntheticEvent<HTMLImageElement>) => {
       const img = e.currentTarget;
 
-      // ✅ setTimeout — mobile এ layout settle হওয়ার পর run করে
       setTimeout(() => {
         const rect = img.getBoundingClientRect();
         const displayW = rect.width;
@@ -119,22 +123,33 @@ const AddHero = () => {
 
         if (!displayW || !displayH) return;
 
+        // ✅ Landscape crop — width সবসময় height এর চেয়ে বড়
+        const cropW = displayW;
+        const cropH = displayW * (9 / 16); // 16:9 landscape ratio
+
+        // যদি cropH image এর height এর চেয়ে বড় হয়ে যায়
+        const finalCropH = cropH > displayH ? displayH : cropH;
+        const finalCropW = cropH > displayH ? displayH * (16 / 9) : cropW;
+
+        const x = (displayW - finalCropW) / 2;
+        const y = (displayH - finalCropH) / 2;
+
         setCrop({
           unit: "px",
-          x: 0,
-          y: 0,
-          width: displayW,
-          height: displayH,
+          x,
+          y,
+          width: finalCropW,
+          height: finalCropH,
         });
 
         setCompletedCrop({
           unit: "px",
-          x: 0,
-          y: 0,
-          width: displayW,
-          height: displayH,
+          x,
+          y,
+          width: finalCropW,
+          height: finalCropH,
         } as PixelCrop);
-      }, 50); // 50ms যথেষ্ট
+      }, 50);
     },
     [],
   );
@@ -410,6 +425,7 @@ const AddHero = () => {
                   onChange={(c) => setCrop(c)}
                   onComplete={(c) => setCompletedCrop(c)}
                   minWidth={100}
+                  aspect={16 / 9}
                 >
                   <img
                     ref={imgRef}
